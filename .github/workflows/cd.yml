@@ -1,0 +1,56 @@
+name: CD Pipeline
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Deploy application
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
+        run: |
+          # Install SSH key
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          # Copy files to the server
+          scp -r . $REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR
+
+          # Restart the application (e.g., using systemd or Docker)
+          ssh $REMOTE_USER@$REMOTE_HOST "cd $REMOTE_DIR && docker-compose up --build -d"
+
+  auto-merge:
+    if: github.event.pull_request.draft == false  # Skip draft PRs
+    needs: deploy  # Wait for the deploy job to complete
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Enable auto-merge
+        uses: peter-evans/enable-pull-request-automerge@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}  # GitHub token for authentication
+          pull-request-number: ${{ github.event.pull_request.number }}  # PR number
+          merge-method: squash  # Options: merge, squash, rebase
